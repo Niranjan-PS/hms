@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import Patient from '../model/Patient.js';
-import User from '../model/userModel.js';
+import User from '../model/UserModel.js';
 import asyncHandler from '../middlewares/asyncHandler.js';
 import Doctor from '../model/Doctor.js';
 
