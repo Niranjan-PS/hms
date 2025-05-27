@@ -1,6 +1,6 @@
 import asyncHandler from '../middlewares/asyncHandler.js';
 import Doctor from '../model/Doctor.js';
-import User from '../model/userModel.js';
+import User from '../model/UserModel.js';
 
 
 const createDoctor = asyncHandler(async (req, res) => {
