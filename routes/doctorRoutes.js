@@ -5,6 +5,7 @@ import {
   getDoctor,
   updateDoctor,
   deleteDoctor,
+  getCurrentDoctor,
 } from '../controller/doctorController.js';
 import {protect,admin } from '../middlewares/protect.js'
 
@@ -13,6 +14,9 @@ const router = express.Router();
 router.route('/')
   .post(protect, admin, createDoctor)
   .get(protect, getAllDoctors);
+
+// Get current doctor (must be before /:id route)
+router.get('/current', protect, getCurrentDoctor);
 
 router.route('/:id')
   .get(protect, getDoctor)

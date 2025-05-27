@@ -36,8 +36,11 @@ const createPatient = asyncHandler(async (req, res) => {
 
 // @desc    Get patient profile by ID or current user
 // @route   GET /api/patients/:id
-// @access  Private (patient for own profile, admin for any)
+// @access  Private (patient for own profile, admin for any, doctor for their patients)
 const getPatient = asyncHandler(async (req, res) => {
+  console.log('Get Patient - User:', req.user);
+  console.log('Get Patient - Patient ID:', req.params.id);
+
   const patient = await Patient.findById(req.params.id).populate('user', 'name email role');
 
   if (!patient) {
@@ -45,12 +48,43 @@ const getPatient = asyncHandler(async (req, res) => {
     throw new Error('Patient not found');
   }
 
-  // Check if user is patient themselves or admin
-  if (patient.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+  // Check access permissions
+  let hasAccess = false;
+
+  if (req.user.role === 'admin') {
+    // Admin can view any patient
+    hasAccess = true;
+  } else if (req.user.role === 'patient') {
+    // Patient can view their own profile
+    hasAccess = patient.user._id.toString() === req.user._id.toString();
+  } else if (req.user.role === 'doctor') {
+    // Doctor can view patients they have appointments with
+    const Appointment = (await import('../model/Appointment.js')).default;
+    const Doctor = (await import('../model/Doctor.js')).default;
+
+    console.log('Get Patient - Checking doctor access for user:', req.user._id);
+    const doctor = await Doctor.findOne({ user: req.user._id });
+
+    if (doctor) {
+      console.log('Get Patient - Found doctor:', doctor._id);
+      const appointment = await Appointment.findOne({
+        doctor: doctor._id,
+        patient: patient._id
+      });
+      console.log('Get Patient - Found appointment:', !!appointment);
+      hasAccess = !!appointment;
+    } else {
+      console.log('Get Patient - Doctor profile not found for user:', req.user._id);
+    }
+  }
+
+  if (!hasAccess) {
+    console.log('Get Patient - Access denied for user:', req.user._id);
     res.status(403);
     throw new Error('Not authorized to view this profile');
   }
 
+  console.log('Get Patient - Success:', patient);
   res.status(200).json(patient);
 });
 
@@ -147,4 +181,31 @@ const deletePatient = asyncHandler(async (req, res) => {
   }
 });
 
-export { createPatient, getPatient, getAllPatients, updatePatient, deletePatient };
+// @desc    Get current patient's profile
+// @route   GET /api/patients/current
+// @access  Private (patient only)
+const getCurrentPatient = asyncHandler(async (req, res) => {
+  console.log('Get Current Patient - User:', req.user);
+
+  if (!req.user || !req.user._id) {
+    res.status(401);
+    throw new Error('User not authenticated');
+  }
+
+  if (req.user.role !== 'patient') {
+    res.status(403);
+    throw new Error('Access denied. Patient role required.');
+  }
+
+  const patient = await Patient.findOne({ user: req.user._id }).populate('user', 'name email role');
+
+  if (!patient) {
+    res.status(404);
+    throw new Error('Patient profile not found');
+  }
+
+  console.log('Get Current Patient - Found:', patient);
+  res.json(patient);
+});
+
+export { createPatient, getPatient, getAllPatients, updatePatient, deletePatient, getCurrentPatient };

@@ -1,7 +1,9 @@
-import Appointment  from '../model/Appointment.js';
-import Doctor   from'../model/Doctor.js'
+import mongoose from 'mongoose';
+import Appointment from '../model/Appointment.js';
+import Doctor from '../model/Doctor.js';
+import Patient from '../model/Patient.js';
 import asyncHandler from '../middlewares/asyncHandler.js';
-import  moment from'moment-timezone'
+import moment from 'moment-timezone';
 
 // Helper function to check doctor availability
 // Helper function to convert time string (e.g., "09:00") to minutes for comparison
@@ -49,13 +51,20 @@ const checkDoctorAvailability = async (doctorId, appointmentDate) => {
   console.log('checkDoctorAvailability - Availability:', availability);
   console.log('checkDoctorAvailability - Appointment Minutes:', appointmentMinutes, 'Start:', startMinutes, 'End:', endMinutes);
 
+if (startMinutes < endMinutes) {
+  // Time range is within the same day
   if (appointmentMinutes < startMinutes || appointmentMinutes >= endMinutes) {
-    return {
-      isAvailable: false,
-      error: `Doctor is not available at the specified time. Available hours on ${dayOfWeek}: ${availability.startTime} to ${availability.endTime} (IST).`,
-    };
+    return { isAvailable: false, error: `Doctor is not available at the specified time. Available hours on ${dayOfWeek}: ${availability.startTime} to ${availability.endTime} (IST).` };
   }
+} else {
+  // Time range spans midnight (e.g., 22:00 to 02:00)
+  const isWithinRange =
+    appointmentMinutes >= startMinutes || appointmentMinutes < endMinutes;
 
+  if (!isWithinRange) {
+    return { isAvailable: false, error: `Doctor is not available at the specified time. Available hours on ${dayOfWeek}: ${availability.startTime} to ${availability.endTime} (IST).` };
+  }
+}
   return { isAvailable: true };
 };
 
@@ -63,7 +72,6 @@ export const createAppointment = async (req, res) => {
   try {
     console.log('Create Appointment - Request Body:', req.body);
     console.log('Create Appointment - req.user:', req.user);
-    console.log('Create Appointment - req.patient:', req.patient);
 
     // Check if req.user is defined
     if (!req.user || !req.user._id) {
@@ -84,11 +92,30 @@ export const createAppointment = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Doctor not found' });
     }
 
-    // Patient validation (already done by middleware, just confirm req.patient exists)
-    if (!req.patient) {
-      console.log('Create Appointment - Patient not found for user ID:', req.user._id);
-      return res.status(404).json({ success: false, error: 'Patient profile not found for authenticated user' });
+    // Find or create patient record
+    let patientRecord = req.patient;
+
+    if (!patientRecord) {
+      console.log('Create Appointment - Patient not found in request, searching by user ID:', req.user._id);
+      patientRecord = await Patient.findOne({ user: req.user._id });
+
+      if (!patientRecord) {
+        console.log('Create Appointment - Creating new patient record for user ID:', req.user._id);
+        patientRecord = new Patient({
+          user: req.user._id,
+          name: req.user.name || 'Unknown',
+          email: req.user.email || '',
+          gender: 'male', // Use a valid enum value (adjust based on schema)
+          phone: '+10000000000', // Placeholder for required field
+          address: 'Unknown', // Placeholder for required field
+          dateOfBirth: new Date('1970-01-01'), // Placeholder for required field
+        });
+        await patientRecord.save();
+        console.log('Create Appointment - Created new patient record:', patientRecord);
+      }
     }
+
+    console.log('Create Appointment - Patient record found:', patientRecord);
 
     // Parse the appointment date (assumed to be in UTC)
     const appointmentDate = new Date(date);
@@ -130,9 +157,9 @@ export const createAppointment = async (req, res) => {
     }
 
     // Create the appointment
-    console.log('Create Appointment - Setting patient ID:', req.user._id);
+    console.log('Create Appointment - Creating appointment with patient ID:', patientRecord._id);
     const appointment = new Appointment({
-      patient: req.patient._id, // Correct: Use Patient ID
+      patient: patientRecord._id,
       doctor,
       date: appointmentDate,
       reason,
@@ -144,17 +171,22 @@ export const createAppointment = async (req, res) => {
 
     // Populate patient and doctor details
     const populatedAppointment = await Appointment.findById(savedAppointment._id)
-      .populate('patient', 'name email')
-      .populate('doctor', 'department');
+      .populate('patient')
+      .populate('doctor');
+
     console.log('Create Appointment - Populated Appointment:', populatedAppointment);
 
     res.status(201).json({
       success: true,
+      message: 'Appointment created successfully',
       appointment: populatedAppointment,
     });
   } catch (error) {
     console.error('Create Appointment - Error:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + error.message,
+    });
   }
 };
 // @desc    Get all appointments (filtered by role)
@@ -164,36 +196,136 @@ export const createAppointment = async (req, res) => {
 export const getAppointments = async (req, res) => {
   try {
     console.log('Get Appointments - req.user:', req.user);
-    console.log('Get Appointments - req.patient:', req.patient);
+    console.log('Get Appointments - User role:', req.user?.role);
 
-    if (!req.patient || !req.patient._id) {
-      console.log('Get Appointments - Patient not found for user ID:', req.user._id);
-      return res.status(404).json({ success: false, error: 'Patient profile not found for authenticated user' });
+    if (!req.user || !req.user._id) {
+      console.log('Get Appointments - No authenticated user');
+      return res.status(401).json({ success: false, error: 'User not authenticated' });
     }
 
-    console.log('Get Appointments - Querying with patient ID:', req.patient._id);
-    const appointments = await Appointment.find({ patient: req.patient._id });
-    console.log('Get Appointments - Appointments before population:', appointments);
+    // Get appointments based on user role
+    let appointments = [];
 
-    const populatedAppointments = await Appointment.find({ patient: req.patient._id })
-      .populate({
-        path: 'patient',
-        populate: { path: 'user', select: 'name email' }
-      })
-      .populate({
-        path: 'doctor',
-        populate: { path: 'user', select: 'name email' }
+    if (req.user.role === 'admin') {
+      // Admin can see all appointments
+      console.log('Get Appointments - Admin user, fetching all appointments');
+      appointments = await Appointment.find()
+        .populate({
+          path: 'patient',
+          populate: {
+            path: 'user',
+            select: 'name email role'
+          },
+          select: 'user dateOfBirth gender phone address medicalHistory',
+        })
+        .populate({
+          path: 'doctor',
+          populate: {
+            path: 'user',
+            select: 'name email'
+          },
+          select: 'name department user email phone'
+        })
+        .sort({ date: -1 });
+    } else if (req.user.role === 'doctor') {
+      // Doctor can see their own appointments
+      console.log('Get Appointments - Doctor user, fetching doctor appointments');
+      const doctorRecord = await Doctor.findOne({ user: req.user._id });
+
+      if (!doctorRecord) {
+        console.log('Get Appointments - Doctor profile not found for user:', req.user._id);
+        return res.status(404).json({
+          success: false,
+          error: 'Doctor profile not found'
+        });
+      }
+
+      console.log('Get Appointments - Found doctor record:', doctorRecord._id);
+
+      appointments = await Appointment.find({ doctor: doctorRecord._id })
+        .populate({
+          path: 'patient',
+          populate: {
+            path: 'user',
+            select: 'name email role'
+          },
+          select: 'user dateOfBirth gender phone address medicalHistory',
+        })
+        .populate({
+          path: 'doctor',
+          populate: {
+            path: 'user',
+            select: 'name email'
+          },
+          select: 'name department user email phone'
+        })
+        .sort({ date: -1 });
+    } else if (req.user.role === 'patient') {
+      // Patient can see their own appointments
+      console.log('Get Appointments - Patient user, fetching patient appointments');
+
+      // Find patient record
+      const patientRecord = await Patient.findOne({ user: req.user._id });
+
+      if (!patientRecord) {
+        console.log('Get Appointments - Patient record not found for user ID:', req.user._id);
+        return res.status(404).json({
+          success: false,
+          error: 'Patient profile not found. Please create a patient profile first.'
+        });
+      }
+
+      console.log('Get Appointments - Found patient record:', patientRecord._id);
+
+      appointments = await Appointment.find({ patient: patientRecord._id })
+        .populate({
+          path: 'patient',
+          populate: {
+            path: 'user',
+            select: 'name email role'
+          },
+          select: 'user dateOfBirth gender phone address medicalHistory',
+        })
+        .populate({
+          path: 'doctor',
+          populate: {
+            path: 'user',
+            select: 'name email'
+          },
+          select: 'name department user email phone'
+        })
+        .sort({ date: -1 });
+    } else {
+      console.log('Get Appointments - Unknown user role:', req.user.role);
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid user role'
       });
+    }
 
-    const validAppointments = populatedAppointments.filter(
-      appointment => appointment.patient && appointment.doctor
-    );
+    // Filter out invalid appointments (missing patient or doctor data)
+    const validAppointments = appointments.filter(appointment => {
+      const isValid = appointment.patient && appointment.patient.user && appointment.doctor;
+      if (!isValid) {
+        console.log('Get Appointments - Invalid appointment found:', appointment._id);
+      }
+      return isValid;
+    });
 
-    console.log('Get Appointments - Fetched appointments:', validAppointments);
-    res.json(validAppointments);
+    console.log('Get Appointments - Total appointments found:', appointments.length);
+    console.log('Get Appointments - Valid appointments:', validAppointments.length);
+
+    res.status(200).json({
+      success: true,
+      count: validAppointments.length,
+      appointments: validAppointments
+    });
   } catch (error) {
     console.error('Get Appointments - Error:', error.message);
-    res.status(500).json({ success: false, error: 'Server error: ' + error.message });
+    res.status(500).json({
+      success: false,
+      error: 'Server error: ' + error.message
+    });
   }
 };
 
@@ -201,12 +333,20 @@ export const getAppointments = async (req, res) => {
 // @route   GET /api/appointments/:id
 // @access  Private
 export const getAppointment = asyncHandler(async (req, res) => {
+  console.log('Get Appointment - Params:', req.params);
+  console.log('Get Appointment - User:', req.user);
+
   const appointment = await Appointment.findById(req.params.id)
-    .populate('patient', 'name email')
-    .populate('doctor', 'name department');
-    console.log("this is the appointment",appointment)
+    .populate({
+      path: 'patient',
+      populate: { path: 'user', select: 'name email' }, // Populate patient.user
+    })
+    .populate('doctor', 'name department user'); // Include user field for doctor
+
+  console.log('Get Appointment - Fetched:', appointment);
 
   if (!appointment) {
+    console.log('Get Appointment - Not found:', req.params.id);
     res.status(404);
     throw new Error('Appointment not found');
   }
@@ -214,44 +354,94 @@ export const getAppointment = asyncHandler(async (req, res) => {
   // Check access
   if (
     req.user.role !== 'admin' &&
-    appointment.patient._id.toString() !== req.user._id.toString() &&
-    appointment.doctor.user?.toString() !== req.user._id.toString()
+    appointment.patient.user?._id.toString() !== req.user._id.toString() &&
+    appointment.doctor.user?._id.toString() !== req.user._id.toString()
   ) {
+    console.log('Get Appointment - Unauthorized for user:', req.user._id);
     res.status(403);
     throw new Error('Unauthorized');
   }
 
-  res.json(appointment);
+  res.json({ success: true, appointment });
 });
 
 // @desc    Update appointment
 // @route   PUT /api/appointments/:id
 // @access  Private
 export const updateAppointment = asyncHandler(async (req, res) => {
-  const appointment = await Appointment.findById(req.params.id);
-  if (!appointment) {
-    res.status(404);
-    throw new Error('Appointment not found');
-  }
+  try {
+    console.log('Update Appointment - User:', req.user);
+    console.log('Update Appointment - Appointment ID:', req.params.id);
+    console.log('Update Appointment - Body:', req.body);
 
-  // Check access
-  if (
-    req.user.role !== 'admin' &&
-    appointment.patient._id.toString() !== req.user._id.toString() &&
-    appointment.doctor.user?.toString() !== req.user._id.toString()
-  ) {
-    res.status(403);
-    throw new Error('Unauthorized');
-  }
+    // Validate appointment ID
+    if (!req.params.id || !mongoose.Types.ObjectId.isValid(req.params.id)) {
+      res.status(400);
+      throw new Error('Invalid appointment ID');
+    }
+
+    const appointment = await Appointment.findById(req.params.id)
+      .populate({
+        path: 'patient',
+        populate: {
+          path: 'user',
+          select: 'name email'
+        }
+      })
+      .populate({
+        path: 'doctor',
+        populate: {
+          path: 'user',
+          select: 'name email'
+        }
+      });
+
+    if (!appointment) {
+      console.log('Update Appointment - Appointment not found:', req.params.id);
+      res.status(404);
+      throw new Error('Appointment not found');
+    }
+
+    console.log('Update Appointment - Found appointment:', {
+      id: appointment._id,
+      patient: appointment.patient?.user?.name,
+      doctor: appointment.doctor?.user?.name,
+      status: appointment.status
+    });
+
+    // Check access - need to properly check doctor access
+    let hasAccess = false;
+
+    if (req.user.role === 'admin') {
+      hasAccess = true;
+      console.log('Update Appointment - Admin access granted');
+    } else if (req.user.role === 'patient') {
+      // Patient can only update their own appointments
+      hasAccess = appointment.patient.user?._id.toString() === req.user._id.toString();
+      console.log('Update Appointment - Patient access check:', hasAccess);
+    } else if (req.user.role === 'doctor') {
+      // Doctor can update appointments assigned to them
+      hasAccess = appointment.doctor.user?._id.toString() === req.user._id.toString();
+      console.log('Update Appointment - Doctor access check:', hasAccess, {
+        appointmentDoctorUserId: appointment.doctor.user?._id.toString(),
+        currentUserId: req.user._id.toString()
+      });
+    }
+
+    if (!hasAccess) {
+      console.log('Update Appointment - Unauthorized access attempt');
+      res.status(403);
+      throw new Error('You are not authorized to update this appointment');
+    }
 
   const { date, reason, status } = req.body;
 
   // Validate doctor availability if date changes
   if (date && date !== appointment.date.toISOString()) {
-    const isAvailable = await checkDoctorAvailability(appointment.doctor, new Date(date));
-    if (!isAvailable) {
+    const availabilityCheck = await checkDoctorAvailability(appointment.doctor._id, new Date(date));
+    if (!availabilityCheck.isAvailable) {
       res.status(400);
-      throw new Error('Doctor is not available at the specified time');
+      throw new Error(availabilityCheck.error || 'Doctor is not available at the specified time');
     }
 
     // Check for conflicting appointments
@@ -284,31 +474,124 @@ export const updateAppointment = asyncHandler(async (req, res) => {
   appointment.status = status || appointment.status;
 
   const updatedAppointment = await appointment.save();
-  res.json(updatedAppointment);
+
+  console.log('Update Appointment - Success:', updatedAppointment);
+  res.json({
+    success: true,
+    message: 'Appointment updated successfully',
+    appointment: updatedAppointment
+  });
+
+  } catch (error) {
+    console.error('Update Appointment - Error:', error);
+    res.status(error.status || 500);
+    throw new Error(error.message || 'Failed to update appointment');
+  }
 });
 
 // @desc    Cancel appointment
 // @route   DELETE /api/appointments/:id
 // @access  Private
 export const cancelAppointment = asyncHandler(async (req, res) => {
-  const appointment = await Appointment.findById(req.params.id);
+  console.log('Cancel Appointment - User:', req.user);
+
+  const appointment = await Appointment.findById(req.params.id)
+    .populate('patient')
+    .populate('doctor');
+
   if (!appointment) {
     res.status(404);
     throw new Error('Appointment not found');
   }
 
-  // Check access
-  if (
-    req.user.role !== 'admin' &&
-    appointment.patient._id.toString() !== req.user._id.toString() &&
-    appointment.doctor.user?.toString() !== req.user._id.toString()
-  ) {
+  // Check access - same logic as update
+  let hasAccess = false;
+
+  if (req.user.role === 'admin') {
+    hasAccess = true;
+  } else if (req.user.role === 'patient') {
+    hasAccess = appointment.patient.user?.toString() === req.user._id.toString();
+  } else if (req.user.role === 'doctor') {
+    hasAccess = appointment.doctor.user?.toString() === req.user._id.toString();
+  }
+
+  if (!hasAccess) {
+    console.log('Cancel Appointment - Unauthorized access attempt');
     res.status(403);
     throw new Error('Unauthorized');
   }
 
   appointment.status = 'cancelled';
-  await appointment.save();
-  res.json({ message: 'Appointment cancelled' });
+  const updatedAppointment = await appointment.save();
+
+  console.log('Cancel Appointment - Success:', updatedAppointment);
+  res.json({ message: 'Appointment cancelled', appointment: updatedAppointment });
+});
+// @desc    Get doctor's appointments
+// @route   GET /api/appointments/doctor
+// @access  Private
+export const getDoctorAppointments = asyncHandler(async (req, res) => {
+  console.log('Get Doctor Appointments - User:', req.user);
+  console.log('Get Doctor Appointments - Headers:', req.headers.authorization);
+
+  const user = req.user;
+
+  if (!user || !user._id) {
+    console.log('Get Doctor Appointments - No authenticated user');
+    res.status(401);
+    throw new Error('User not authenticated');
+  }
+
+  if (user.role !== 'doctor') {
+    console.log('Get Doctor Appointments - Unauthorized: Not a doctor, role:', user.role);
+    res.status(403);
+    throw new Error('Unauthorized: Doctor role required');
+  }
+
+  const doctor = await Doctor.findOne({ user: user._id }).select('_id name department');
+  if (!doctor) {
+    console.log('Get Doctor Appointments - Doctor not found for user:', user._id);
+    res.status(404);
+    throw new Error('Doctor profile not found');
+  }
+
+  console.log('Get Doctor Appointments - Found doctor:', doctor._id);
+
+  const appointments = await Appointment.find({ doctor: doctor._id })
+    .populate({
+      path: 'patient',
+      populate: {
+        path: 'user',
+        select: 'name email role'
+      },
+      select: 'user dateOfBirth gender phone address medicalHistory',
+    })
+    .populate({
+      path: 'doctor',
+      populate: {
+        path: 'user',
+        select: 'name email'
+      },
+      select: 'name department user email phone'
+    })
+    .sort({ date: -1 });
+
+  // Filter out appointments with missing patient or doctor data
+  const validAppointments = appointments.filter(appointment => {
+    const isValid = appointment.patient && appointment.patient.user && appointment.doctor;
+    if (!isValid) {
+      console.log('Get Doctor Appointments - Invalid appointment found:', appointment._id);
+    }
+    return isValid;
+  });
+
+  console.log('Get Doctor Appointments - Total appointments:', appointments.length);
+  console.log('Get Doctor Appointments - Valid appointments:', validAppointments.length);
+
+  res.json({
+    success: true,
+    count: validAppointments.length,
+    appointments: validAppointments
+  });
 });
 

@@ -110,4 +110,31 @@ const deleteDoctor = asyncHandler(async (req, res) => {
   }
 });
 
-export { createDoctor, getAllDoctors, getDoctor, updateDoctor, deleteDoctor };
+// @desc    Get current doctor
+// @route   GET /api/doctors/current
+// @access  Private
+const getCurrentDoctor = asyncHandler(async (req, res) => {
+  console.log('Get Current Doctor - User:', req.user);
+
+  if (!req.user || !req.user._id) {
+    res.status(401);
+    throw new Error('User not authenticated');
+  }
+
+  if (req.user.role !== 'doctor') {
+    res.status(403);
+    throw new Error('Access denied. Doctor role required.');
+  }
+
+  const doctor = await Doctor.findOne({ user: req.user._id }).populate('user', 'name email');
+
+  if (!doctor) {
+    res.status(404);
+    throw new Error('Doctor profile not found');
+  }
+
+  console.log('Get Current Doctor - Found:', doctor);
+  res.json(doctor);
+});
+
+export { createDoctor, getAllDoctors, getDoctor, updateDoctor, deleteDoctor, getCurrentDoctor };
