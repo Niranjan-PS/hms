@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.route('/').post(protect, createPatient).get(protect, getAllPatients);
 
-// Get current patient (must be before /:id route)
+
 router.get('/current', protect, getCurrentPatient);
 
 router.route('/:id').get(protect, getPatient).put(protect, updatePatient).delete(protect, deletePatient);

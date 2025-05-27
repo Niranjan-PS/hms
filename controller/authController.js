@@ -10,7 +10,7 @@ const registerUser = asyncHandler(async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    // Validate input
+    
     if (!name || !email || !password || !role) {
       return res.status(400).json({
         success: false,
@@ -18,7 +18,7 @@ const registerUser = asyncHandler(async (req, res) => {
       });
     }
 
-    // Check if user already exists
+   
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({
@@ -27,13 +27,13 @@ const registerUser = asyncHandler(async (req, res) => {
       });
     }
 
-    // Create new user
+   
     const user = await User.create({ name, email, password, role });
 
-    // Generate token with user details
+    
     const token = generateToken(user._id, user.role, user.name, user.email);
 
-    // Send success response
+   
     res.status(201).json({
       success: true,
       _id: user._id,
@@ -43,7 +43,7 @@ const registerUser = asyncHandler(async (req, res) => {
       token,
     });
   } catch (err) {
-    console.error('Register Error:', err.message);
+    
     res.status(500).json({
       success: false,
       message: 'Server Error: ' + err.message
@@ -58,7 +58,7 @@ const loginUser = asyncHandler(async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validate input
+    
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -66,7 +66,7 @@ const loginUser = asyncHandler(async (req, res) => {
       });
     }
 
-    // Check for user
+    
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({
@@ -75,13 +75,13 @@ const loginUser = asyncHandler(async (req, res) => {
       });
     }
 
-    // Check password
+    
     const isMatch = await user.matchPassword(password);
     if (isMatch) {
-      // Generate token with user details
+      
       const token = generateToken(user._id, user.role, user.name, user.email);
 
-      // Send success response
+      
       return res.status(200).json({
         success: true,
         _id: user._id,
@@ -97,7 +97,7 @@ const loginUser = asyncHandler(async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Login Error:', error.message);
+    
     res.status(500).json({
       success: false,
       message: 'Server Error: ' + error.message
@@ -110,14 +110,12 @@ const loginUser = asyncHandler(async (req, res) => {
 
 const logoutUser = asyncHandler(async (req, res) => {
   try {
-    // Since JWT is stateless, logout is handled client-side by removing the token
-    // We'll just send a success response
     res.status(200).json({
       success: true,
       message: 'Logged out successfully'
     });
   } catch (error) {
-    console.error('Logout Error:', error.message);
+    
     res.status(500).json({
       success: false,
       message: 'Logout failed'
@@ -125,7 +123,7 @@ const logoutUser = asyncHandler(async (req, res) => {
   }
 });
 
-// Generate JWT
+
 const generateToken = (id, role, name = '', email = '') => {
   return jwt.sign({
     id,
@@ -133,7 +131,7 @@ const generateToken = (id, role, name = '', email = '') => {
     name,
     email
   }, process.env.JWT_SECRET, {
-    expiresIn: '30d', // Token expires in 30 days
+    expiresIn: '30d', 
   });
 };
 

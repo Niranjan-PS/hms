@@ -2,12 +2,10 @@ import asyncHandler from '../middlewares/asyncHandler.js';
 import Doctor from '../model/Doctor.js';
 import User from '../model/userModel.js';
 
-// @desc    Create a new doctor
-// @route   POST /api/doctors
-// @access  Private/Admin
+
 const createDoctor = asyncHandler(async (req, res) => {
   const { name, email, password, phone, department, licenseNumber, availability } = req.body;
-  console.log('Create doctor request body:', req.body);
+
 
   if (!name || !email || !password || !phone || !department || !licenseNumber) {
     res.status(400);
@@ -48,17 +46,13 @@ const createDoctor = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc    Get all doctors
-// @route   GET /api/doctors
-// @access  Private
+
 const getAllDoctors = asyncHandler(async (req, res) => {
   const doctors = await Doctor.find().populate('user', 'name email role');
   res.json(doctors);
 });
 
-// @desc    Get doctor by ID
-// @route   GET /api/doctors/:id
-// @access  Private
+
 const getDoctor = asyncHandler(async (req, res) => {
   const doctor = await Doctor.findById(req.params.id).populate('user', 'name email role');
   if (doctor) {
@@ -69,9 +63,6 @@ const getDoctor = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Update doctor profile
-// @route   PUT /api/doctors/:id
-// @access  Private/Doctor or Admin
 const updateDoctor = asyncHandler(async (req, res) => {
   const doctor = await Doctor.findById(req.params.id);
   if (doctor) {
@@ -95,9 +86,6 @@ const updateDoctor = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Delete doctor
-// @route   DELETE /api/doctors/:id
-// @access  Private/Admin
 const deleteDoctor = asyncHandler(async (req, res) => {
   const doctor = await Doctor.findById(req.params.id);
   if (doctor) {
@@ -110,11 +98,8 @@ const deleteDoctor = asyncHandler(async (req, res) => {
   }
 });
 
-// @desc    Get current doctor
-// @route   GET /api/doctors/current
-// @access  Private
 const getCurrentDoctor = asyncHandler(async (req, res) => {
-  console.log('Get Current Doctor - User:', req.user);
+  
 
   if (!req.user || !req.user._id) {
     res.status(401);
@@ -133,7 +118,7 @@ const getCurrentDoctor = asyncHandler(async (req, res) => {
     throw new Error('Doctor profile not found');
   }
 
-  console.log('Get Current Doctor - Found:', doctor);
+  
   res.json(doctor);
 });
 

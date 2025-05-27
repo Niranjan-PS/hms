@@ -15,7 +15,7 @@ router.route('/')
   .post(protect, admin, createDoctor)
   .get(protect, getAllDoctors);
 
-// Get current doctor (must be before /:id route)
+
 router.get('/current', protect, getCurrentDoctor);
 
 router.route('/:id')
