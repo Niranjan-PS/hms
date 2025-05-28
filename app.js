@@ -10,7 +10,7 @@ import errorHandler from './middlewares/error.js'
 const app = express();
 
 
-app.use(cors({ origin: 'http://localhost:4200' }))
+app.use(cors({ origin: 'hms-frontend-iota.vercel.app' }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
