@@ -10,7 +10,7 @@ import errorHandler from './middlewares/error.js'
 const app = express();
 
 const allowedOrigins = [
-  'https://hms-frontend-iota.vercel.app', 
+  'https://hms-frontend-htnz.onrender.com', 
   'http://localhost:4200' 
 ];
 
